@@ -51,7 +51,19 @@ class TransformerPlayer(Player):
     # Prompt
     # -------------------------
     def _build_prompt(self, fen: str) -> str:
-        return f"FEN: {fen}\nMove:"
+        board = chess.Board(fen)
+        legal_moves = [m.uci() for m in board.legal_moves]
+
+        # Limit how many moves we include so the prompt doesn't get huge
+        legal_moves = legal_moves[:40]
+
+        return (
+            "You are a chess assistant.\n"
+            "Choose ONE move from the provided legal moves list.\n"
+            f"FEN: {fen}\n"
+            f"Legal moves: {' '.join(legal_moves)}\n"
+            "Move (UCI only):"
+        )
 
     def _extract_move(self, text: str) -> Optional[str]:
         match = self.UCI_REGEX.search(text)
