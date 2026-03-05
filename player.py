@@ -23,7 +23,7 @@ class TransformerPlayer(Player):
            
         super().__init__(name)
 
-        self.model_id = "Qwen/Qwen2.5-7B-Instruct"
+        self.model_id = "Qwen/Qwen2.5-0.5B-Instruct"
         self.temperature = 0.7
         self.max_new_tokens = 8
 
