@@ -18,18 +18,13 @@ class TransformerPlayer(Player):
 
     UCI_REGEX = re.compile(r"\b([a-h][1-8][a-h][1-8][qrbn]?)\b", re.IGNORECASE)
 
-    def __init__(
-        self,
-        name: str = "TinyLMPlayer",
-        model_id: str = "HuggingFaceTB/SmolLM2-135M-Instruct",
-        temperature: float = 0.7,
-        max_new_tokens: int = 8,
-    ):
+    def __init__(self, name: str = "TinyLMPlayer"):
+           
         super().__init__(name)
 
-        self.model_id = model_id
-        self.temperature = temperature
-        self.max_new_tokens = max_new_tokens
+        self.model_id = "HuggingFaceTB/SmolLM2-135M-Instruct"
+        self.temperature = 0.7
+        self.max_new_tokens = 8
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
