@@ -1,5 +1,4 @@
 import chess
-import random
 import re
 import torch
 from typing import Optional
@@ -14,9 +13,7 @@ class TransformerPlayer(Player):
     def __init__(self, name: str = "TransformerPlayer"):
         super().__init__(name)
 
-        # CHANGE THIS TO YOUR HF MODEL
         self.model_id = "egeb9/chess-gpt2-midterm_new"
-
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.tokenizer = None
@@ -38,22 +35,17 @@ class TransformerPlayer(Player):
         match = self.UCI_REGEX.search(text)
         return match.group(0) if match else None
 
-    def _random_legal(self, fen: str) -> Optional[str]:
-        board = chess.Board(fen)
-        moves = list(board.legal_moves)
-        return random.choice(moves).uci() if moves else None
-
     def get_move(self, fen: str) -> Optional[str]:
         board = chess.Board(fen)
-        legal_moves = [m.uci() for m in board.legal_moves]
 
-        if not legal_moves:
+        # If no legal moves exist, game is over
+        if board.is_game_over():
             return None
 
         try:
             self._load_model()
         except Exception:
-            return random.choice(legal_moves)
+            return None
 
         prompt = f"FEN: {fen}\nMove:"
 
@@ -72,10 +64,8 @@ class TransformerPlayer(Player):
             text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             move = self._extract_first_uci(text)
 
-            if move in legal_moves:
-                return move
+            # Return whatever the model produced, even if illegal
+            return move
 
         except Exception:
-            pass
-
-        return random.choice(legal_moves)
+            return None
