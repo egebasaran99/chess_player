@@ -12,7 +12,7 @@ class TransformerPlayer(Player):
     def __init__(self, name: str = "TransformerPlayer"):
         super().__init__(name)
 
-        self.model_id = "egeb9/chess-gpt2-midterm"
+        self.model_id = "egeb9/chess-gpt2-midterm_new"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.tokenizer = None
