@@ -15,7 +15,7 @@ class TransformerPlayer(Player):
         super().__init__(name)
 
         # CHANGE THIS TO YOUR HF MODEL
-        self.model_id = "YOUR_USERNAME/chess-gpt2-midterm"
+        self.model_id = "YOUR_USERNAME/chess-gpt2-midterm_new"
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
