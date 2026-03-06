@@ -1,3 +1,5 @@
 python-chess
 torch
 transformers
+accelerate
+huggingface_hub
