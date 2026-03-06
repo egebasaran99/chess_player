@@ -34,7 +34,7 @@ class TransformerPlayer(Player):
         moves = list(board.legal_moves)
         return random.choice(moves).uci() if moves else None
 
-    def _candidate_moves(self, board: chess.Board, max_candidates: int = 12) -> list[str]:
+    def _candidate_moves(self, board: chess.Board, max_candidates: int = 16) -> list[str]:
         legal_moves = list(board.legal_moves)
         if not legal_moves:
             return []
