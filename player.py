@@ -12,10 +12,12 @@ class TransformerPlayer(Player):
     """
     GPT-2 based chess player for the midterm assignment.
 
+    Design:
     - Inherits from chess_tournament.players.Player
     - Can be initialized with only the player name
     - Uses a public Hugging Face model by default
-    - Keeps rule-based logic light: legality + mild candidate prioritization
+    - LM is the main decision maker
+    - Rule-based logic is limited to legality + light candidate prioritization
     """
 
     UCI_REGEX = re.compile(r"\b([a-h][1-8][a-h][1-8][qrbn]?)\b", re.IGNORECASE)
@@ -26,7 +28,8 @@ class TransformerPlayer(Player):
         model_id: str = "egeb9/chess-gpt2-midterm_new",
         temperature: float = 0.7,
         max_new_tokens: int = 8,
-        tactical_weight: float = 0.08,
+        tactical_weight: float = 0.05,
+        candidate_pool_size: int = 24,
     ):
         super().__init__(name)
 
@@ -34,10 +37,10 @@ class TransformerPlayer(Player):
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
         self.tactical_weight = tactical_weight
+        self.candidate_pool_size = candidate_pool_size
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # Lazy loading
         self.tokenizer = None
         self.model = None
 
@@ -73,8 +76,8 @@ class TransformerPlayer(Player):
 
     def _get_lm_score(self, prompt: str, move_str: str) -> float:
         """
-        Scores a candidate move by computing its conditional log-probability
-        under the language model.
+        Score a candidate move with conditional log-probability.
+        Higher is better.
         """
         full_text = prompt + " " + move_str
         inputs = self.tokenizer(full_text, return_tensors="pt").to(self.device)
@@ -93,8 +96,8 @@ class TransformerPlayer(Player):
 
     def _score_move_tactical(self, board: chess.Board, move: chess.Move) -> float:
         """
-        Very light normalized tactical tie-break score.
-        Intended to stay small so the LM remains primary.
+        Small normalized tactical tie-break score.
+        Keeps LM as the main signal.
         Approximate range: [-1, 1]
         """
         score = 0.0
@@ -112,13 +115,30 @@ class TransformerPlayer(Player):
                 score += value_map.get(captured_piece.piece_type, 0) / 10.0
 
         if move.promotion:
-            score += 0.3
+            score += 0.4
 
         board.push(move)
+
         if board.is_checkmate():
             score += 1.0
+        elif board.is_stalemate():
+            score -= 0.6
         elif board.is_check():
             score += 0.2
+        else:
+            # Light anti-blunder check:
+            # penalize moves that allow opponent mate in 1
+            try:
+                for reply in board.legal_moves:
+                    board.push(reply)
+                    is_mate = board.is_checkmate()
+                    board.pop()
+                    if is_mate:
+                        score -= 1.0
+                        break
+            except Exception:
+                pass
+
         board.pop()
 
         return max(-1.0, min(1.0, score))
@@ -126,13 +146,13 @@ class TransformerPlayer(Player):
     def _get_candidate_moves(self, board: chess.Board):
         """
         Light candidate filtering:
-        - if few legal moves, keep all
-        - otherwise prioritize promotions, captures, and checking moves
-        - then add a few random remaining legal moves
+        - if move count is small, score all legal moves
+        - otherwise prioritize promotions, captures, checks
+        - then add random remaining legal moves up to candidate_pool_size
         """
         legal_moves = list(board.legal_moves)
 
-        if len(legal_moves) <= 8:
+        if len(legal_moves) <= 20:
             return legal_moves
 
         promotions = []
@@ -155,15 +175,19 @@ class TransformerPlayer(Player):
 
         candidates = promotions + captures + checks
 
-        remaining = 12 - len(candidates)
-        if remaining > 0:
-            random.shuffle(others)
-            candidates += others[:remaining]
+        random.shuffle(others)
+        remaining = max(0, self.candidate_pool_size - len(candidates))
+        candidates += others[:remaining]
 
-        if not candidates:
-            return legal_moves
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_candidates = []
+        for move in candidates:
+            if move not in seen:
+                seen.add(move)
+                unique_candidates.append(move)
 
-        return candidates
+        return unique_candidates if unique_candidates else legal_moves
 
     # -------------------------
     # Main API
