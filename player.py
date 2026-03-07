@@ -1,24 +1,80 @@
-import random
 import chess
+import random
+import re
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from typing import Optional
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+from chess_tournament.players import Player
 
 
-class TransformerPlayer:
-    def __init__(self, model_name="egebasaran99/chess-gpt2"):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+class TransformerPlayer(Player):
+    """
+    GPT-2 based chess player for the midterm assignment.
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
-        self.model.to(self.device)
-        self.model.eval()
+    - Inherits from chess_tournament.players.Player
+    - Can be initialized with only the player name
+    - Uses a public Hugging Face model by default
+    - Keeps rule-based logic light: legality + mild candidate prioritization
+    """
 
-        # Small tactical weight so LM dominates
-        self.tactical_weight = 0.08
+    UCI_REGEX = re.compile(r"\b([a-h][1-8][a-h][1-8][qrbn]?)\b", re.IGNORECASE)
 
-    def _get_lm_score(self, prompt, move_str):
+    def __init__(
+        self,
+        name: str = "TransformerPlayer",
+        model_id: str = "egeb9/chess-gpt2-midterm_new",
+        temperature: float = 0.7,
+        max_new_tokens: int = 8,
+        tactical_weight: float = 0.08,
+    ):
+        super().__init__(name)
+
+        self.model_id = model_id
+        self.temperature = temperature
+        self.max_new_tokens = max_new_tokens
+        self.tactical_weight = tactical_weight
+
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Lazy loading
+        self.tokenizer = None
+        self.model = None
+
+    # -------------------------
+    # Lazy loading
+    # -------------------------
+    def _load_model(self):
+        if self.model is None:
+            print(f"[{self.name}] Loading {self.model_id} on {self.device}...")
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+
+            self.model = AutoModelForCausalLM.from_pretrained(self.model_id)
+            self.model.to(self.device)
+            self.model.eval()
+
+    # -------------------------
+    # Utilities
+    # -------------------------
+    def _random_legal(self, fen: str) -> Optional[str]:
+        board = chess.Board(fen)
+        moves = list(board.legal_moves)
+        return random.choice(moves).uci() if moves else None
+
+    def _build_prompt(self, fen: str) -> str:
+        return f"FEN: {fen}\nMove:"
+
+    def _extract_move(self, text: str) -> Optional[str]:
+        match = self.UCI_REGEX.search(text)
+        return match.group(1).lower() if match else None
+
+    def _get_lm_score(self, prompt: str, move_str: str) -> float:
         """
-        Score move using the language model.
+        Scores a candidate move by computing its conditional log-probability
+        under the language model.
         """
         full_text = prompt + " " + move_str
         inputs = self.tokenizer(full_text, return_tensors="pt").to(self.device)
@@ -35,10 +91,11 @@ class TransformerPlayer:
 
         return token_log_probs.sum().item()
 
-    def _score_move_tactical(self, board, move):
+    def _score_move_tactical(self, board: chess.Board, move: chess.Move) -> float:
         """
-        Very light normalized tactical evaluation.
-        Range approximately [-1, 1]
+        Very light normalized tactical tie-break score.
+        Intended to stay small so the LM remains primary.
+        Approximate range: [-1, 1]
         """
         score = 0.0
 
@@ -50,33 +107,36 @@ class TransformerPlayer:
                     chess.KNIGHT: 3,
                     chess.BISHOP: 3,
                     chess.ROOK: 5,
-                    chess.QUEEN: 9
+                    chess.QUEEN: 9,
                 }
                 score += value_map.get(captured_piece.piece_type, 0) / 10.0
 
-        board.push(move)
+        if move.promotion:
+            score += 0.3
 
+        board.push(move)
         if board.is_checkmate():
             score += 1.0
         elif board.is_check():
             score += 0.2
-
         board.pop()
 
         return max(-1.0, min(1.0, score))
 
-    def _get_candidate_moves(self, board):
+    def _get_candidate_moves(self, board: chess.Board):
         """
-        Light candidate filtering.
-        Prioritize tactically relevant moves but do not exclude too much.
+        Light candidate filtering:
+        - if few legal moves, keep all
+        - otherwise prioritize promotions, captures, and checking moves
+        - then add a few random remaining legal moves
         """
         legal_moves = list(board.legal_moves)
 
         if len(legal_moves) <= 8:
             return legal_moves
 
-        captures = []
         promotions = []
+        captures = []
         checks = []
         others = []
 
@@ -105,31 +165,44 @@ class TransformerPlayer:
 
         return candidates
 
-    def get_move(self, fen):
+    # -------------------------
+    # Main API
+    # -------------------------
+    def get_move(self, fen: str) -> Optional[str]:
         board = chess.Board(fen)
 
         if board.is_game_over():
             return None
 
-        candidates = self._get_candidate_moves(board)
-        prompt = fen + " ->"
+        try:
+            self._load_model()
+        except Exception:
+            return self._random_legal(fen)
 
-        best_move = None
-        best_score = float("-inf")
+        prompt = self._build_prompt(fen)
 
-        for move in candidates:
-            move_str = move.uci()
+        try:
+            candidates = self._get_candidate_moves(board)
 
-            lm_score = self._get_lm_score(prompt, move_str)
-            tactical_score = self._score_move_tactical(board, move)
+            best_move = None
+            best_score = float("-inf")
 
-            total_score = lm_score + self.tactical_weight * tactical_score
+            for move in candidates:
+                move_str = move.uci()
 
-            if total_score > best_score:
-                best_score = total_score
-                best_move = move
+                lm_score = self._get_lm_score(prompt, move_str)
+                tactical_score = self._score_move_tactical(board, move)
 
-        if best_move is None:
-            return random.choice(list(board.legal_moves)).uci()
+                total_score = lm_score + self.tactical_weight * tactical_score
 
-        return best_move.uci()
+                if total_score > best_score:
+                    best_score = total_score
+                    best_move = move
+
+            if best_move is not None:
+                return best_move.uci()
+
+        except Exception:
+            pass
+
+        return self._random_legal(fen)
