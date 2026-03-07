@@ -14,7 +14,7 @@ class TransformerPlayer(Player):
     def __init__(
         self,
         name: str = "TransformerPlayer",
-        model_id: str = "egeb9/chess-gpt2-midterm_new",
+        model_id: str = "egeb9/chess-gpt2-v2",
         tactical_weight: float = 0.08,
         candidate_pool_size: int = 24,
     ):
