@@ -1,5 +1,5 @@
-python-chess
+chess
 torch
 transformers
+sentencepiece
 accelerate
-huggingface_hub
