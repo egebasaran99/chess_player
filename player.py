@@ -225,7 +225,7 @@ class TransformerPlayer(Player):
                 tactical_score = self._score_move_tactical(board, move)
 
                 # Tactical score should matter more than LM score
-                total_score = tactical_score + 1.0 * lm_score
+                total_score = 0 * tactical_score + 1.0 * lm_score
 
                 if total_score > best_score:
                     best_score = total_score
