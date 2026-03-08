@@ -14,7 +14,7 @@ class TransformerPlayer(Player):
     def __init__(
         self,
         name: str = "TransformerPlayer",
-        model_id: str = "egeb9/chess-gpt2-v2",
+        model_id: str = "egeb9/chess-gpt2-v3",
         candidate_pool_size: int = 24,
     ):
         super().__init__(name)
