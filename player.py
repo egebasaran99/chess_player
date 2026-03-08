@@ -1,6 +1,5 @@
 import chess
 import random
-import re
 import torch
 from typing import Optional
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -9,12 +8,10 @@ from chess_tournament.players import Player
 
 
 class TransformerPlayer(Player):
-    UCI_REGEX = re.compile(r"\b([a-h][1-8][a-h][1-8][qrbn]?)\b", re.IGNORECASE)
-
     def __init__(
         self,
         name: str = "TransformerPlayer",
-        model_id: str = "egeb9/chess-gpt2-v3",
+        model_id: str = "egeb9/chess-gpt2-v4",
         candidate_pool_size: int = 24,
     ):
         super().__init__(name)
@@ -26,9 +23,7 @@ class TransformerPlayer(Player):
         self.tokenizer = None
         self.model = None
 
-    # -------------------------
     # Lazy loading
-    # -------------------------
     def _load_model(self):
         if self.model is None:
             print(f"[{self.name}] Loading {self.model_id} on {self.device}...")
@@ -41,9 +36,7 @@ class TransformerPlayer(Player):
             self.model.to(self.device)
             self.model.eval()
 
-    # -------------------------
     # Utilities
-    # -------------------------
     def _random_legal(self, fen: str) -> Optional[str]:
         board = chess.Board(fen)
         moves = list(board.legal_moves)
@@ -88,7 +81,7 @@ class TransformerPlayer(Player):
                 board.push(move)
                 if board.is_checkmate():
                     board.pop()
-                    return [move]  # force mate in 1 immediately
+                    return [move]
                 if board.is_check():
                     checks.append(move)
                 else:
@@ -101,7 +94,6 @@ class TransformerPlayer(Player):
         remaining = max(0, self.candidate_pool_size - len(candidates))
         candidates += others[:remaining]
 
-        # deduplicate preserving order
         seen = set()
         unique = []
         for mv in candidates:
@@ -111,9 +103,7 @@ class TransformerPlayer(Player):
 
         return unique if unique else legal_moves
 
-    # -------------------------
     # Main API
-    # -------------------------
     def get_move(self, fen: str) -> Optional[str]:
         board = chess.Board(fen)
 
@@ -130,7 +120,6 @@ class TransformerPlayer(Player):
         try:
             candidates = self._get_candidate_moves(board)
 
-            # If only one forced candidate (e.g. mate in 1), play it
             if len(candidates) == 1:
                 return candidates[0].uci()
 
