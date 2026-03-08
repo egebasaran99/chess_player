@@ -68,18 +68,58 @@ class TransformerPlayer(Player):
 
         return token_log_probs.sum().item()
 
+    def _is_immediate_stalemate(self, board: chess.Board, move: chess.Move) -> bool:
+        board.push(move)
+        is_stalemate = board.is_stalemate()
+        board.pop()
+        return is_stalemate
+
+    def _allows_opponent_mate_in_1(self, board: chess.Board, move: chess.Move) -> bool:
+        board.push(move)
+
+        for reply in board.legal_moves:
+            board.push(reply)
+            is_mate = board.is_checkmate()
+            board.pop()
+
+            if is_mate:
+                board.pop()
+                return True
+
+        board.pop()
+        return False
+
     def _get_candidate_moves(self, board: chess.Board):
         legal_moves = list(board.legal_moves)
 
         if len(legal_moves) <= 20:
             return legal_moves
 
+        safe_moves = []
+        fallback_moves = []
+
+        for move in legal_moves:
+            if self._is_immediate_stalemate(board, move):
+                fallback_moves.append(move)
+                continue
+
+            if self._allows_opponent_mate_in_1(board, move):
+                fallback_moves.append(move)
+                continue
+
+            safe_moves.append(move)
+
+        base_moves = safe_moves if safe_moves else legal_moves
+
+        if len(base_moves) <= 20:
+            return base_moves
+
         promotions = []
         captures = []
         checks = []
         others = []
 
-        for move in legal_moves:
+        for move in base_moves:
             if move.promotion:
                 promotions.append(move)
             elif board.is_capture(move):
@@ -109,7 +149,7 @@ class TransformerPlayer(Player):
                 seen.add(mv)
                 unique.append(mv)
 
-        return unique if unique else legal_moves
+        return unique if unique else base_moves
 
     # -------------------------
     # Main API
@@ -130,7 +170,6 @@ class TransformerPlayer(Player):
         try:
             candidates = self._get_candidate_moves(board)
 
-            # If only one forced candidate (e.g. mate in 1), play it
             if len(candidates) == 1:
                 return candidates[0].uci()
 
