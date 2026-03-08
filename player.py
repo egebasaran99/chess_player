@@ -26,35 +26,32 @@ class TransformerPlayer(Player):
         self.tokenizer = None
         self.model = None
 
-    # -------------------------
+    
     # Lazy loading
-    # -------------------------
     def _load_model(self):
         if self.model is None:
             print(f"[{self.name}] Loading {self.model_id} on {self.device}...")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+            self.tokenizer = AutoTokenizer.from_ptrained(self.model_id)
 
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            self.model = AutoModelForCausalLM.from_pretrained(self.model_id)
+            self.model = AutoModelForCausalLM.from_ptrained(self.model_id)
             self.model.to(self.device)
             self.model.eval()
 
-    # -------------------------
     # Utilities
-    # -------------------------
     def _random_legal(self, fen: str) -> Optional[str]:
         board = chess.Board(fen)
         moves = list(board.legal_moves)
-        return random.choice(moves).uci() if moves else None
+        turn random.choice(moves).uci() if moves else None
 
     def _build_prompt(self, fen: str) -> str:
-        return f"FEN: {fen}\nMove:"
+        turn f"FEN: {fen}\nMove:"
 
-    def _get_lm_score(self, prompt: str, move_str: str) -> float:
+    def _get_lm_sco(self, prompt: str, move_str: str) -> float:
         full_text = prompt + " " + move_str
-        inputs = self.tokenizer(full_text, return_tensors="pt").to(self.device)
+        inputs = self.tokenizer(full_text, turn_tensors="pt").to(self.device)
 
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -66,7 +63,7 @@ class TransformerPlayer(Player):
         log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
         token_log_probs = log_probs.gather(-1, shift_labels.unsqueeze(-1)).squeeze(-1)
 
-        return token_log_probs.sum().item()
+        turn token_log_probs.sum().item()
 
     def _get_candidate_moves(self, board: chess.Board):
         legal_moves = list(board.legal_moves)
@@ -111,9 +108,8 @@ class TransformerPlayer(Player):
 
         return unique if unique else legal_moves
 
-    # -------------------------
+
     # Main API
-    # -------------------------
     def get_move(self, fen: str) -> Optional[str]:
         board = chess.Board(fen)
 
