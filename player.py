@@ -15,21 +15,16 @@ class TransformerPlayer(Player):
         self,
         name: str = "TransformerPlayer",
         model_id: str = "egeb9/chess-gpt2-v2",
-        tactical_weight: float = 0.0,
         candidate_pool_size: int = 24,
     ):
         super().__init__(name)
 
         self.model_id = model_id
-        self.tactical_weight = tactical_weight
         self.candidate_pool_size = candidate_pool_size
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.tokenizer = None
         self.model = None
-
-        # Simple anti-repetition memory for positions this player has seen
-        self.seen_fens = {}
 
     # -------------------------
     # Lazy loading
@@ -72,110 +67,6 @@ class TransformerPlayer(Player):
         token_log_probs = log_probs.gather(-1, shift_labels.unsqueeze(-1)).squeeze(-1)
 
         return token_log_probs.sum().item()
-
-    def _material_balance(self, board: chess.Board) -> float:
-        values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9,
-        }
-
-        score = 0
-        for piece_type, value in values.items():
-            score += len(board.pieces(piece_type, chess.WHITE)) * value
-            score -= len(board.pieces(piece_type, chess.BLACK)) * value
-
-        return score
-
-    def _is_endgame(self, board: chess.Board) -> bool:
-        total_nonking = 0
-        for piece_type in [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT]:
-            total_nonking += len(board.pieces(piece_type, chess.WHITE))
-            total_nonking += len(board.pieces(piece_type, chess.BLACK))
-        return total_nonking <= 4
-
-    def _king_activity_bonus(self, board: chess.Board, side: bool) -> float:
-        king_sq = board.king(side)
-        if king_sq is None:
-            return 0.0
-        file_idx = chess.square_file(king_sq)
-        rank_idx = chess.square_rank(king_sq)
-        # closer to center = better in endgames
-        dist = abs(file_idx - 3.5) + abs(rank_idx - 3.5)
-        return (7.0 - dist) / 7.0
-
-    def _score_move_tactical(self, board: chess.Board, move: chess.Move) -> float:
-        score = 0.0
-        mover = board.turn
-
-        # Capture bonus
-        if board.is_capture(move):
-            captured_piece = board.piece_at(move.to_square)
-            if captured_piece:
-                value_map = {
-                    chess.PAWN: 1,
-                    chess.KNIGHT: 3,
-                    chess.BISHOP: 3,
-                    chess.ROOK: 5,
-                    chess.QUEEN: 9,
-                }
-                score += value_map.get(captured_piece.piece_type, 0) / 8.0
-
-        # Promotion bonus
-        if move.promotion:
-            score += 0.8
-
-        before_material = self._material_balance(board)
-
-        board.push(move)
-
-        # Immediate tactical outcomes
-        if board.is_checkmate():
-            board.pop()
-            return 1.0
-
-        if board.is_stalemate():
-            score -= 0.9
-
-        if board.is_check():
-            score += 0.25
-
-        # Avoid giving opponent mate in 1
-        opp_has_mate_in_1 = False
-        for reply in board.legal_moves:
-            board.push(reply)
-            is_mate = board.is_checkmate()
-            board.pop()
-            if is_mate:
-                opp_has_mate_in_1 = True
-                break
-        if opp_has_mate_in_1:
-            score -= 1.0
-
-        # Material improvement bonus
-        after_material = self._material_balance(board)
-        if mover == chess.WHITE:
-            score += 0.10 * (after_material - before_material)
-        else:
-            score += 0.10 * (before_material - after_material)
-
-        # Anti-repetition penalty
-        fen_key = board.board_fen() + (" w" if board.turn == chess.WHITE else " b")
-        repeat_count = self.seen_fens.get(fen_key, 0)
-        score -= 0.35 * repeat_count
-
-        # Endgame king activity
-        if self._is_endgame(board):
-            own_king_bonus = self._king_activity_bonus(board, mover)
-            opp_king_bonus = self._king_activity_bonus(board, not mover)
-            score += 0.15 * own_king_bonus
-            score -= 0.05 * opp_king_bonus
-
-        board.pop()
-
-        return max(-1.0, min(1.0, score))
 
     def _get_candidate_moves(self, board: chess.Board):
         legal_moves = list(board.legal_moves)
@@ -220,15 +111,14 @@ class TransformerPlayer(Player):
 
         return unique if unique else legal_moves
 
+    # -------------------------
+    # Main API
+    # -------------------------
     def get_move(self, fen: str) -> Optional[str]:
         board = chess.Board(fen)
 
         if board.is_game_over():
             return None
-
-        # record current position
-        fen_key = board.board_fen() + (" w" if board.turn == chess.WHITE else " b")
-        self.seen_fens[fen_key] = self.seen_fens.get(fen_key, 0) + 1
 
         try:
             self._load_model()
@@ -250,11 +140,9 @@ class TransformerPlayer(Player):
             for move in candidates:
                 move_str = move.uci()
                 lm_score = self._get_lm_score(prompt, move_str)
-                tactical_score = self._score_move_tactical(board, move)
-                total_score = lm_score + self.tactical_weight * tactical_score
 
-                if total_score > best_score:
-                    best_score = total_score
+                if lm_score > best_score:
+                    best_score = lm_score
                     best_move = move
 
             if best_move is not None:
